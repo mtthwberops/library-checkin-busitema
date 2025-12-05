@@ -33,6 +33,10 @@
                 </div>
                 <h1 class="text-3xl font-bold text-gray-900 tracking-tight">Library Check-in</h1>
                 <p class="text-gray-500 mt-2 text-sm">Busitema University</p>
+                <div class="mt-4">
+                    <a href="students.html"
+                        class="text-indigo-600 hover:text-indigo-800 text-sm font-medium underline">Manage Students</a>
+                </div>
             </div>
 
             <!-- Live Occupancy Display -->
@@ -266,6 +270,10 @@
                     const newOccupancy = Math.max(0, currentOccupancy + (newEventType === "check-in" ? 1 : -1));
 
                     transaction.set(occupancyRef, { currentOccupancy: newOccupancy }, { merge: true });
+
+                    // Update student status
+                    const studentRef = doc(db, "students", studentId);
+                    transaction.set(studentRef, { status: newEventType === "check-in" ? "in" : "out" }, { merge: true });
                     // Include studentName in the log for easier display
                     transaction.set(doc(collection(db, "checkinLogs")), {
                         studentId,
