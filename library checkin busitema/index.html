@@ -84,13 +84,23 @@
         const occupancyDisplay = document.getElementById('occupancy-display');
 
         // Sign in anonymously
-        signInAnonymously(auth).catch(error => {
-            showStatus("Authentication failed. Please refresh.", "error");
-        });
+        signInAnonymously(auth)
+            .then(() => {
+                console.log("User signed in anonymously");
+            })
+            .catch(error => {
+                console.error("Auth Error:", error);
+                showStatus("Authentication failed. Check console.", "error");
+            });
 
         // Live occupancy listener
         onSnapshot(doc(db, "libraryStats", "current"), (doc) => {
+            console.log("Snapshot received:", doc.data());
             occupancyDisplay.textContent = doc.exists() ? doc.data().currentOccupancy : "0";
+        }, (error) => {
+            console.error("Snapshot Error:", error);
+            occupancyDisplay.textContent = "Err";
+            showStatus("Failed to load occupancy. Check console.", "error");
         });
 
         // Card tap handler
@@ -136,7 +146,7 @@
                     const occupancyDoc = await transaction.get(occupancyRef);
 
                     const currentOccupancy = occupancyDoc.exists() ? occupancyDoc.data().currentOccupancy : 0;
-                    const newOccupancy = Math.max(0, currentOccupancy + (newEventType === "check-in" ? 1 : -1)); // why this logic??
+                    const newOccupancy = Math.max(0, currentOccupancy + (newEventType === "check-in" ? 1 : -1));
 
                     transaction.set(occupancyRef, { currentOccupancy: newOccupancy }, { merge: true });
                     transaction.set(doc(collection(db, "checkinLogs")), {
@@ -167,7 +177,7 @@
                 type === 'success' ? 'text-green-600' :
                     type === 'error' ? 'text-red-600' :
                         type === 'processing' ? 'text-blue-600' :
-                'text-gray-500'
+                            'text-gray-500'
             );
         }
 
