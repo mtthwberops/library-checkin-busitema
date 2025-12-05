@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>University Library Kiosk</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+    </style>
+</head>
+
+
+<body class="bg-gray-100 flex items-center justify-center h-screen">
+
+    <div class="w-full max-w-md bg-white rounded-2xl shadow-lg p-8">
+
+        <div class="text-center mb-6">
+            <h1 class="text-3xl font-bold text-gray-800">Library Check-in</h1>
+            <p class="text-gray-500 mt-2">Tap student card or enter Card UID below.</p>
+        </div>
+
+        <!-- Live Occupancy Display -->
+        <div class="bg-indigo-50 border-2 border-indigo-200 rounded-xl p-4 mb-6">
+            <p class="text-sm font-medium text-indigo-600 text-center">Live Library Occupancy</p>
+            <p id="occupancy-display" class="text-5xl font-bold text-indigo-800 text-center mt-2">__</p>
+        </div>
+
+        <!-- Input and Action Area -->
+        <div class="space-y-4">
+            <input type="text" id="card-uid-input" placeholder="Enter Card UID to simulate tap..."
+                class="w-full px-4 py-3 text-lg border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition">
+
+            <button id="process-card-button"
+                class="w-full bg-indigo-600 text-white font-bold text-lg py-3 rounded-lg hover:bg-indigo-700 focus:outline-none focus:ring-4 focus:ring-indigo-300 transition-transform transform hover:scale-105">
+                Process Card Tap
+            </button>
+        </div>
+
+        <!-- Status Message Area -->
+        <div id="status-message" class="mt-6 text-center text-lg font-medium h-8 transition-opacity duration-300"></div>
+
+    </div>
+
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
+        import {
+            getFirestore,
+            doc,
+            collection,
+            query,
+            where,
+            getDocs,
+            onSnapshot,
+            orderBy,
+            limit,
+            runTransaction,
+            serverTimestamp
+        } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js";
+        import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-auth.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyDaAXU7EldHegMh8GwKIerawR1JW38yGYI",
+            authDomain: "uni-library-checkin.firebaseapp.com",
+            projectId: "uni-library-checkin",
+            storageBucket: "uni-library-checkin.appspot.com",
+            messagingSenderId: "190756010969",
+            appId: "1:190756010969:web:0d8a529d2a2adba928b7c8"
+        };
+
+        // Initialize Firebase services
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+
+        // Initialize UI elements
+        const statusEl = document.getElementById('status-message');
+        const cardInput = document.getElementById('card-uid-input');
+        const occupancyDisplay = document.getElementById('occupancy-display');
+
+        // Sign in anonymously
+        signInAnonymously(auth).catch(error => {
+            showStatus("Authentication failed. Please refresh.", "error");
+        });
+
+        // Live occupancy listener
+        onSnapshot(doc(db, "libraryStats", "current"), (doc) => {
+            occupancyDisplay.textContent = doc.exists() ? doc.data().currentOccupancy : "0";
+        });
+
+        // Card tap handler
+        async function handleCardTap() {
+            const cardUid = cardInput.value.trim();
+            if (!cardUid) {
+                showStatus("Please enter a Card UID.", "error");
+                return;
+            }
+            showStatus("Processing...", "processing");
+
+            try {
+                // Find student
+                const studentQuery = await getDocs(
+                    query(collection(db, "students"), where("cardUid", "==", cardUid))
+                );
+
+                if (studentQuery.empty) {
+                    showStatus(`Card UID "${cardUid}" not found.`, "error");
+                    return;
+                }
+
+                const studentDoc = studentQuery.docs[0];
+                const studentId = studentDoc.id;
+                const studentName = studentDoc.data().Name;
+
+                // Get last check-in status
+                const lastLogQuery = await getDocs(
+                    query(
+                        collection(db, "checkinLogs"),
+                        where("studentId", "==", studentId),
+                        orderBy("timestamp", "desc"),
+                        limit(1)
+                    )
+                );
+
+                const lastEventType = lastLogQuery.empty ? "check-out" : lastLogQuery.docs[0].data().eventType;
+                const newEventType = lastEventType === "check-in" ? "check-out" : "check-in";
+
+                // Update occupancy and logs in transaction
+                await runTransaction(db, async (transaction) => {
+                    const occupancyRef = doc(db, "libraryStats", "current");
+                    const occupancyDoc = await transaction.get(occupancyRef);
+
+                    const currentOccupancy = occupancyDoc.exists() ? occupancyDoc.data().currentOccupancy : 0;
+                    const newOccupancy = Math.max(0, currentOccupancy + (newEventType === "check-in" ? 1 : -1)); // why this logic??
+
+                    transaction.set(occupancyRef, { currentOccupancy: newOccupancy }, { merge: true });
+                    transaction.set(doc(collection(db, "checkinLogs")), {
+                        studentId,
+                        eventType: newEventType,
+                        timestamp: serverTimestamp()
+                    });
+                });
+
+                showStatus(
+                    newEventType === "check-in" ? `Welcome, ${studentName}!` : `Goodbye, ${studentName}!`,
+                    "success"
+                );
+
+            } catch (error) {
+                console.error("Error:", error);
+                showStatus("An error occurred. Please try again.", "error");
+            } finally {
+                cardInput.value = "";
+            }
+        }
+
+        // UI helpers
+        function showStatus(message, type) {
+            statusEl.textContent = message;
+            statusEl.classList.remove('text-green-600', 'text-red-600', 'text-gray-500');
+            statusEl.classList.add(
+                type === 'success' ? 'text-green-600' :
+                    type === 'error' ? 'text-red-600' :
+                        type === 'processing' ? 'text-blue-600' :
+                'text-gray-500'
+            );
+        }
+
+        // Event listeners
+        document.getElementById('process-card-button').addEventListener('click', handleCardTap);
+        cardInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') handleCardTap();
+        });
+
+    </script>
+</body>
+
+</html>
